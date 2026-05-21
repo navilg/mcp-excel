@@ -10,7 +10,8 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
-    command: python server.py --transport http --host 0.0.0.0 --port 8000
+    command: >
+      sh -c "python server.py --transport http --host 0.0.0.0 --port 8000"
     volumes:
       - ./excel_files:/app/excel_files
     restart: unless-stopped
