@@ -71,6 +71,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.transport == "http":
-        mcp.run(transport="streamable-http", host=args.host, port=args.port)
+        # FastMCP.run signature varies across versions.
+        try:
+            mcp.run(transport="streamable-http", host=args.host, port=args.port)
+        except TypeError:
+            mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
