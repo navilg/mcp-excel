@@ -21,3 +21,22 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  mcp-utility-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.utility
+    container_name: mcp-utility-server
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "python utility_server.py --transport http --host 0.0.0.0 --port 8001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

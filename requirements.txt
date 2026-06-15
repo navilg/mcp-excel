@@ -2,3 +2,4 @@ mcp
 pandas
 openpyxl
 xlrd
+httpx
