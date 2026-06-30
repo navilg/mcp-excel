@@ -78,6 +78,46 @@ def _get_column_idx(ws, column_name: str) -> int:
 
 
 # =============================================
+# BASE64 UTILITY tools
+# =============================================
+
+
+@mcp.tool
+def encode_base64(data: str) -> str:
+    """Encode plain text to a base64 string.
+
+    Use this to encode a file's content (e.g. an Excel file read as text)
+    into base64 so it can be passed to other tools like `read_excel`.
+
+    Args:
+        data: Plain text content to encode.
+    """
+    try:
+        encoded = base64.b64encode(data.encode("utf-8")).decode("ascii")
+        return encoded
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool
+def decode_base64(encoded_data: str) -> str:
+    """Decode a base64 string back to plain text.
+
+    Use this to decode the base64 output returned by write tools
+    (Create/Update/Delete) to verify the content, or to inspect
+    the decoded payload of a base64-encoded Excel file.
+
+    Args:
+        encoded_data: Base64-encoded string to decode.
+    """
+    try:
+        decoded = base64.b64decode(encoded_data, validate=True).decode("utf-8")
+        return decoded
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# =============================================
 # CREATE tools
 # =============================================
 
