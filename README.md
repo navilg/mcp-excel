@@ -36,8 +36,29 @@ An MCP (Model Context Protocol) server that provides tools to perform **CRUD ope
 
 ## Common Parameters
 
-- **`file_path`** – Path to the `.xlsx` file on disk. When you attach an Excel file in chat, the file path is automatically passed.
+- **`file_content`** – Base64-encoded content of the `.xlsx` file. The MCP client reads the file, encodes it, and passes it to the tool. This works because MCP server and LLM can be on **different machines**.
 - **`sheet_name`** – (Optional) Name of the target sheet. Defaults to the **first sheet** in the workbook if omitted.
+
+## What Each Tool Returns
+
+| Tool type | Returns |
+|-----------|---------|
+| **Read** (e.g. `read_excel`) | **TSV text** – the sheet contents |
+| **Write** (Create / Update / Delete) | **Base64 encoded workbook** – the modified file that the client can save or pass to another tool |
+| **Error** | Plain text starting with `Error: ` |
+
+## Data Flow (Remote Setup)
+
+```
+User attaches file in chat
+       ↓
+MCP Client reads file as bytes → base64 encodes it
+       ↓
+Tool receives `file_content` (base64 string)
+       ↓
+Read tool → returns TSV text for display
+Write tool → returns base64 of modified workbook → client can save it
+```
 
 ## Usage
 
@@ -60,11 +81,11 @@ For stdio transport (for use with MCP clients like Claude Desktop):
 python server.py --transport stdio
 ```
 
-## Output Format
+## Output Format Details
 
 - **TSV** – Read operations return data as tab-separated values
-- **Plaintext** – Success/error messages are returned as plain text
-- Special characters `\n` (newline) and `\t` (tab) in cell values are escaped to literal `\n` and `\t`
+- **Plaintext** – Error messages always start with `Error: `
+- Special characters `\n` (newline) and `\t` (tab) in cell values are escaped to literal `\n` and `\t` to prevent broken formatting
 
 ## Docker
 
