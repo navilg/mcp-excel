@@ -4,6 +4,12 @@ An MCP (Model Context Protocol) server that provides tools to perform **CRUD ope
 
 ## Tools
 
+### Utility
+| Tool | Description |
+|------|-------------|
+| `encode_base64` | Encode plain text to base64 (use to encode file content for other tools) |
+| `decode_base64` | Decode a base64 string back to plain text (use to inspect write tool output) |
+
 ### Create (C)
 | Tool | Description |
 |------|-------------|
@@ -33,31 +39,34 @@ An MCP (Model Context Protocol) server that provides tools to perform **CRUD ope
 | `delete_row` | Delete a row from the sheet |
 | `delete_column` | Delete a column by its header name |
 
-
 ## Common Parameters
 
-- **`file_content`** – Base64-encoded content of the `.xlsx` file. The MCP client reads the file, encodes it, and passes it to the tool. This works because MCP server and LLM can be on **different machines**.
+- **`file_content`** – Base64-encoded content of the `.xlsx` file. Use `encode_base64` to convert a file's text content to base64 first.
 - **`sheet_name`** – (Optional) Name of the target sheet. Defaults to the **first sheet** in the workbook if omitted.
 
 ## What Each Tool Returns
 
 | Tool type | Returns |
 |-----------|---------|
+| **Utility** (`encode_base64`, `decode_base64`) | Plain text |
 | **Read** (e.g. `read_excel`) | **TSV text** – the sheet contents |
-| **Write** (Create / Update / Delete) | **Base64 encoded workbook** – the modified file that the client can save or pass to another tool |
+| **Write** (Create / Update / Delete) | **Base64 encoded workbook** – the modified file |
 | **Error** | Plain text starting with `Error: ` |
 
 ## Data Flow (Remote Setup)
 
 ```
-User attaches file in chat
+User attaches Excel file in chat
        ↓
-MCP Client reads file as bytes → base64 encodes it
+LLM calls encode_base64 with file content → gets base64 string
        ↓
-Tool receives `file_content` (base64 string)
+LLM passes base64 to any CRUD tool as file_content
        ↓
 Read tool → returns TSV text for display
-Write tool → returns base64 of modified workbook → client can save it
+Write tool → returns base64 of modified workbook
+       ↓
+LLM can use decode_base64 to inspect the output, or
+pass the base64 directly to the user to save as .xlsx
 ```
 
 ## Usage
