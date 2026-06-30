@@ -1,11 +1,12 @@
 import argparse
-from pathlib import Path
+import base64
+import io
 
 from fastmcp import FastMCP
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 
 mcp = FastMCP(name="Excel CRUD MCP")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,12 +20,29 @@ def _sanitize(value) -> str:
     return str(value).replace("\n", "\\n").replace("\t", "\\t")
 
 
-def _open_workbook(file_path: str, read_only: bool = False):
-    """Open an existing workbook. Raises ValueError if file not found."""
-    path = Path(file_path)
-    if not path.exists():
-        raise ValueError(f"File not found: {file_path}")
-    return load_workbook(path, read_only=read_only)
+def _decode_excel(content: str) -> io.BytesIO:
+    """Decode a base64-encoded Excel file into a BytesIO stream."""
+    try:
+        raw = base64.b64decode(content, validate=True)
+    except Exception as exc:
+        raise ValueError(
+            "file_content must be a valid base64-encoded Excel file payload"
+        ) from exc
+    return io.BytesIO(raw)
+
+
+def _encode_excel(wb) -> str:
+    """Save a workbook to a base64-encoded string."""
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("ascii")
+
+
+def _open_workbook(content: str, read_only: bool = False):
+    """Decode and open a workbook from base64 content."""
+    source = _decode_excel(content)
+    return load_workbook(source, read_only=read_only)
 
 
 def _get_sheet(wb, sheet_name: str | None = None):
@@ -35,7 +53,6 @@ def _get_sheet(wb, sheet_name: str | None = None):
                 f"Sheet '{sheet_name}' not found. Available sheets: {wb.sheetnames}"
             )
         return wb[sheet_name]
-    # Default to first sheet
     return wb[wb.sheetnames[0]]
 
 
@@ -66,29 +83,35 @@ def _get_column_idx(ws, column_name: str) -> int:
 
 
 @mcp.tool
-def add_row(file_path: str, row_data: str, sheet_name: str | None = None) -> str:
+def add_row(
+    file_content: str,
+    row_data: str,
+    sheet_name: str | None = None,
+) -> str:
     """Add a new row at the end of the sheet.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         row_data: Tab-separated values for the row (e.g. "val1\\tval2\\tval3").
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         values = row_data.split("\t")
         ws.append(values)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Row added successfully to sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def add_cell_data(
-    file_path: str,
+    file_content: str,
     row_number: int,
     column_name: str,
     value: str,
@@ -96,43 +119,47 @@ def add_cell_data(
 ) -> str:
     """Write a value into a specific cell identified by column name and row number.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         row_number: Row number (1 = first data row, header is row 1).
         column_name: Column header name.
         value: Value to write.
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         col_idx = _get_column_idx(ws, column_name)
         row_idx = row_number + 1  # +1 for header
         ws.cell(row=row_idx, column=col_idx, value=value)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Cell ({row_number}, '{column_name}') set to '{value}' in sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def add_column(
-    file_path: str,
+    file_content: str,
     column_name: str,
     default_value: str = "",
     sheet_name: str | None = None,
 ) -> str:
     """Add a new column with a header name and optional default value for existing rows.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         column_name: Header name for the new column.
         default_value: Default value for existing rows (default: empty string).
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         new_col = (ws.max_column or 0) + 1
         # Write header
@@ -140,16 +167,16 @@ def add_column(
         # Fill default for existing data rows
         for r in range(2, (ws.max_row or 1) + 1):
             ws.cell(row=r, column=new_col, value=default_value)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Column '{column_name}' added to sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def add_full_data(
-    file_path: str,
+    file_content: str,
     data: str,
     sheet_name: str | None = None,
 ) -> str:
@@ -158,13 +185,15 @@ def add_full_data(
     The first line of `data` is treated as column headers.
     Subsequent lines are data rows.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         data: TSV-formatted data (header line + data lines, tab-separated).
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         # Clear existing content
         if ws.max_row:
@@ -174,30 +203,32 @@ def add_full_data(
             values = line.split("\t")
             for j, val in enumerate(values, start=1):
                 ws.cell(row=i + 1, column=j, value=val)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Full data written to sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
-def create_sheet(file_path: str, sheet_name: str) -> str:
+def create_sheet(file_content: str, sheet_name: str) -> str:
     """Create a new sheet in the workbook.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         sheet_name: Name for the new sheet.
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         if sheet_name in wb.sheetnames:
             wb.close()
             return f"Error: Sheet '{sheet_name}' already exists"
         wb.create_sheet(title=sheet_name)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Sheet '{sheet_name}' created successfully"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
@@ -208,15 +239,18 @@ def create_sheet(file_path: str, sheet_name: str) -> str:
 
 
 @mcp.tool
-def read_excel(file_path: str, sheet_name: str | None = None) -> str:
+def read_excel(
+    file_content: str,
+    sheet_name: str | None = None,
+) -> str:
     """Read an Excel sheet and return its content as TSV.
 
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path, read_only=True)
+        wb = _open_workbook(file_content, read_only=True)
         ws = _get_sheet(wb, sheet_name)
         result = _sheet_to_tsv(ws)
         wb.close()
@@ -227,7 +261,7 @@ def read_excel(file_path: str, sheet_name: str | None = None) -> str:
 
 @mcp.tool
 def read_rows_by_column(
-    file_path: str,
+    file_content: str,
     column_name: str,
     column_value: str,
     sheet_name: str | None = None,
@@ -235,22 +269,28 @@ def read_rows_by_column(
     """Read rows where a specific column matches a value.
 
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         column_name: Column header name to filter on.
         column_value: Value to match in the column.
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path, read_only=True)
+        wb = _open_workbook(file_content, read_only=True)
         ws = _get_sheet(wb, sheet_name)
         col_idx = _get_column_idx(ws, column_name)
 
-        headers = [cell for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+        headers = [
+            cell
+            for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+        ]
         matching_rows = []
 
         for row in ws.iter_rows(min_row=2, values_only=True):
             cell_value = row[col_idx - 1]
-            if cell_value is not None and str(cell_value).strip() == column_value.strip():
+            if (
+                cell_value is not None
+                and str(cell_value).strip() == column_value.strip()
+            ):
                 matching_rows.append(row)
 
         wb.close()
@@ -274,36 +314,38 @@ def read_rows_by_column(
 
 @mcp.tool
 def update_row(
-    file_path: str,
+    file_content: str,
     row_number: int,
     row_data: str,
     sheet_name: str | None = None,
 ) -> str:
     """Update an entire row with new values.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         row_number: Row number (1 = first data row, header is row 1).
         row_data: Tab-separated new values for the row.
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         values = row_data.split("\t")
         row_idx = row_number + 1  # +1 for header
         for j, val in enumerate(values, start=1):
             ws.cell(row=row_idx, column=j, value=val)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Row {row_number} updated in sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def update_cell(
-    file_path: str,
+    file_content: str,
     row_number: int,
     column_name: str,
     value: str,
@@ -311,32 +353,31 @@ def update_cell(
 ) -> str:
     """Update a single cell by column name and row number.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         row_number: Row number (1 = first data row).
         column_name: Column header name.
         value: New value for the cell.
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         col_idx = _get_column_idx(ws, column_name)
         row_idx = row_number + 1
         ws.cell(row=row_idx, column=col_idx, value=value)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return (
-            f"Cell ({row_number}, '{column_name}') updated to '{value}'"
-            f" in sheet '{ws.title}'"
-        )
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def replace_full_data(
-    file_path: str,
+    file_content: str,
     new_data: str,
     sheet_name: str | None = None,
 ) -> str:
@@ -344,12 +385,14 @@ def replace_full_data(
 
     This is an alias for add_full_data with clearer semantics for updates.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         new_data: TSV-formatted data (first line = headers).
         sheet_name: Sheet name (defaults to first sheet).
     """
-    return add_full_data(file_path, new_data, sheet_name)
+    return add_full_data(file_content, new_data, sheet_name)
 
 
 # =============================================
@@ -358,15 +401,17 @@ def replace_full_data(
 
 
 @mcp.tool
-def delete_sheet(file_path: str, sheet_name: str) -> str:
+def delete_sheet(file_content: str, sheet_name: str) -> str:
     """Delete a sheet from the workbook.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         sheet_name: Name of the sheet to delete.
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         if sheet_name not in wb.sheetnames:
             wb.close()
             return f"Error: Sheet '{sheet_name}' not found"
@@ -374,62 +419,66 @@ def delete_sheet(file_path: str, sheet_name: str) -> str:
             wb.close()
             return "Error: Cannot delete the only sheet in the workbook"
         del wb[sheet_name]
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Sheet '{sheet_name}' deleted"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def delete_row(
-    file_path: str,
+    file_content: str,
     row_number: int,
     sheet_name: str | None = None,
 ) -> str:
     """Delete a row from the sheet.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         row_number: Row number to delete (1 = first data row, header is row 1).
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         row_idx = row_number + 1  # +1 for header
         if ws.max_row and row_idx > ws.max_row:
             wb.close()
             return f"Error: Row {row_number} does not exist in sheet '{ws.title}'"
         ws.delete_rows(row_idx)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Row {row_number} deleted from sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool
 def delete_column(
-    file_path: str,
+    file_content: str,
     column_name: str,
     sheet_name: str | None = None,
 ) -> str:
     """Delete a column by its header name from the sheet.
 
+    Returns the modified workbook as base64 so the client can save it.
+
     Args:
-        file_path: Path to the Excel .xlsx file.
+        file_content: Base64-encoded Excel (.xlsx) file content.
         column_name: Column header name to delete.
         sheet_name: Sheet name (defaults to first sheet).
     """
     try:
-        wb = _open_workbook(file_path)
+        wb = _open_workbook(file_content)
         ws = _get_sheet(wb, sheet_name)
         col_idx = _get_column_idx(ws, column_name)
         ws.delete_cols(col_idx)
-        wb.save(file_path)
+        result = _encode_excel(wb)
         wb.close()
-        return f"Column '{column_name}' deleted from sheet '{ws.title}'"
+        return result
     except Exception as e:
         return f"Error: {e}"
 
